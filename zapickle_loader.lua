@@ -12,16 +12,12 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- // CONFIG
 local CONFIG = {
-    Username = LocalPlayer.Name,
     LoadTime = 300, -- 5 minutes in seconds
     AccentColor = Color3.fromRGB(0, 180, 255),
     AccentColor2 = Color3.fromRGB(95, 63, 255),
-    BgColor = Color3.fromRGB(10, 11, 16),
-    CardColor = Color3.fromRGB(16, 19, 31),
+    CardColor = Color3.fromRGB(13, 15, 24),
     TextColor = Color3.fromRGB(255, 255, 255),
-    SubTextColor = Color3.fromRGB(120, 130, 160),
-    ToggleOnColor = Color3.fromRGB(0, 180, 255),
-    ToggleOffColor = Color3.fromRGB(40, 44, 60),
+    SubTextColor = Color3.fromRGB(110, 120, 150),
 }
 
 -- // STATE
@@ -34,12 +30,15 @@ local State = {
     GodMode = false,
 }
 
+-- cycling messages spread evenly over 5 minutes
 local LoadingMessages = {
     "Initializing executor...",
     "Bypassing anti-cheat...",
     "Injecting hooks...",
+    "Patching memory tables...",
     "Loading modules...",
-    "Patching memory...",
+    "Verifying signatures...",
+    "Connecting to backend...",
     "Almost ready...",
     "Finalizing...",
 }
@@ -49,7 +48,7 @@ if PlayerGui:FindFirstChild("ZapickleLoader") then
     PlayerGui.ZapickleLoader:Destroy()
 end
 
--- // SCREEN GUI
+-- // SCREEN GUI — no black overlay, game stays visible
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ZapickleLoader"
 ScreenGui.ResetOnSpawn = false
@@ -57,14 +56,11 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent = PlayerGui
 
--- // UTILITY FUNCTIONS
+-- // UTILITY
 local function Tween(obj, props, duration, style, dir)
-    local info = TweenInfo.new(
-        duration or 0.4,
-        style or Enum.EasingStyle.Quart,
-        dir or Enum.EasingDirection.Out
-    )
-    local t = TweenService:Create(obj, info, props)
+    local t = TweenService:Create(obj,
+        TweenInfo.new(duration or 0.4, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out),
+        props)
     t:Play()
     return t
 end
@@ -72,7 +68,6 @@ end
 local function MakeFrame(parent, props)
     local f = Instance.new("Frame")
     f.BorderSizePixel = 0
-    f.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     f.BackgroundTransparency = 1
     for k, v in pairs(props or {}) do f[k] = v end
     f.Parent = parent
@@ -86,6 +81,7 @@ local function MakeLabel(parent, props)
     l.TextColor3 = CONFIG.TextColor
     l.Font = Enum.Font.GothamBold
     l.TextScaled = false
+    l.TextWrapped = true
     for k, v in pairs(props or {}) do l[k] = v end
     l.Parent = parent
     return l
@@ -116,119 +112,152 @@ local function MakeGradient(parent, rotation, keypoints)
     return g
 end
 
--- // OVERLAY BACKGROUND
-local Overlay = MakeFrame(ScreenGui, {
-    Size = UDim2.new(1, 0, 1, 0),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundTransparency = 0,
-    BackgroundColor3 = CONFIG.BgColor,
-    ZIndex = 1,
-})
+local function PadNum(n)
+    return string.format("%02d", math.floor(n))
+end
+
+-- // DRAGGABLE
+local function MakeDraggable(frame, handle)
+    handle = handle or frame
+    local dragging, dragInput, dragStart, startPos
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
 
 -- // =============================
 -- //        LOADER CARD
 -- // =============================
-local LoaderCard = MakeFrame(Overlay, {
-    Size = UDim2.new(0, 360, 0, 440),
-    Position = UDim2.new(0.5, -180, 0.5, -220),
+local LoaderCard = MakeFrame(ScreenGui, {
+    Size = UDim2.new(0, 340, 0, 416),
+    Position = UDim2.new(0.5, -170, 0.5, -208),
     BackgroundColor3 = CONFIG.CardColor,
-    BackgroundTransparency = 0,
+    BackgroundTransparency = 0.06,
     ZIndex = 2,
 })
 MakeCorner(LoaderCard, 20)
-MakeStroke(LoaderCard, CONFIG.AccentColor, 1, 0.75)
+MakeStroke(LoaderCard, CONFIG.AccentColor, 1, 0.72)
+MakeDraggable(LoaderCard)
 
 -- top glow line
-local TopLine = MakeFrame(LoaderCard, {
-    Size = UDim2.new(0.5, 0, 0, 1),
-    Position = UDim2.new(0.25, 0, 0, 0),
+local TL = MakeFrame(LoaderCard, {
+    Size = UDim2.new(0.55, 0, 0, 1),
+    Position = UDim2.new(0.225, 0, 0, 0),
     BackgroundColor3 = CONFIG.AccentColor,
-    BackgroundTransparency = 0.2,
+    BackgroundTransparency = 0,
     ZIndex = 3,
 })
-MakeGradient(TopLine, 90, {
+MakeGradient(TL, 90, {
     ColorSequenceKeypoint.new(0, Color3.fromRGB(0,0,0)),
     ColorSequenceKeypoint.new(0.5, CONFIG.AccentColor),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0)),
 })
 
--- avatar background circle
-local AvatarBG = MakeFrame(LoaderCard, {
-    Size = UDim2.new(0, 90, 0, 90),
-    Position = UDim2.new(0.5, -45, 0, 28),
-    BackgroundColor3 = Color3.fromRGB(20, 24, 40),
-    ZIndex = 3,
-})
-MakeCorner(AvatarBG, 45)
-
 -- spinning ring
 local AvatarRing = MakeFrame(LoaderCard, {
-    Size = UDim2.new(0, 102, 0, 102),
-    Position = UDim2.new(0.5, -51, 0, 22),
+    Size = UDim2.new(0, 104, 0, 104),
+    Position = UDim2.new(0.5, -52, 0, 22),
     BackgroundTransparency = 1,
     ZIndex = 3,
 })
-MakeCorner(AvatarRing, 51)
-local RingStroke = MakeStroke(AvatarRing, CONFIG.AccentColor, 2, 0.1)
+MakeCorner(AvatarRing, 52)
+MakeStroke(AvatarRing, CONFIG.AccentColor, 2, 0.1)
 
--- avatar label (emoji fallback)
-local AvatarLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(0, 90, 0, 90),
-    Position = UDim2.new(0.5, -45, 0, 28),
+-- avatar bg
+local AvatarBG = MakeFrame(LoaderCard, {
+    Size = UDim2.new(0, 88, 0, 88),
+    Position = UDim2.new(0.5, -44, 0, 30),
+    BackgroundColor3 = Color3.fromRGB(18, 22, 36),
+    BackgroundTransparency = 0,
+    ZIndex = 3,
+})
+MakeCorner(AvatarBG, 44)
+MakeStroke(AvatarBG, CONFIG.AccentColor, 1, 0.8)
+
+MakeLabel(AvatarBG, {
+    Size = UDim2.new(1, 0, 1, 0),
     Text = "🎮",
-    TextSize = 38,
+    TextSize = 36,
     ZIndex = 4,
 })
 
 -- username
-local UsernameLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(1, -20, 0, 34),
-    Position = UDim2.new(0, 10, 0, 130),
-    Text = CONFIG.Username,
-    TextSize = 26,
-    TextColor3 = CONFIG.TextColor,
-    ZIndex = 3,
+MakeLabel(LoaderCard, {
+    Size = UDim2.new(1, -20, 0, 32),
+    Position = UDim2.new(0, 10, 0, 140),
+    Text = LocalPlayer.Name,
+    TextSize = 24,
     Font = Enum.Font.GothamBold,
+    ZIndex = 3,
 })
 
 -- handle
-local HandleLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(1, -20, 0, 20),
-    Position = UDim2.new(0, 10, 0, 165),
-    Text = "@" .. CONFIG.Username:lower(),
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(0, 140, 200),
-    ZIndex = 3,
+MakeLabel(LoaderCard, {
+    Size = UDim2.new(1, -20, 0, 18),
+    Position = UDim2.new(0, 10, 0, 173),
+    Text = "@" .. LocalPlayer.Name:lower(),
+    TextSize = 12,
+    TextColor3 = Color3.fromRGB(0, 145, 200),
     Font = Enum.Font.Code,
-})
-
--- status label
-local StatusLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(1, -20, 0, 26),
-    Position = UDim2.new(0, 10, 0, 200),
-    Text = "SCRIPT LOADING",
-    TextSize = 16,
-    TextColor3 = Color3.fromRGB(245, 166, 35),
     ZIndex = 3,
-    Font = Enum.Font.GothamBold,
 })
 
--- sub text
+-- SCRIPT LOADING label
+local StatusLabel = MakeLabel(LoaderCard, {
+    Size = UDim2.new(1, -20, 0, 24),
+    Position = UDim2.new(0, 10, 0, 204),
+    Text = "SCRIPT LOADING",
+    TextSize = 15,
+    TextColor3 = Color3.fromRGB(245, 166, 35),
+    Font = Enum.Font.GothamBold,
+    ZIndex = 3,
+})
+
+-- cycling sub message
 local SubLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(1, -20, 0, 20),
-    Position = UDim2.new(0, 10, 0, 228),
+    Size = UDim2.new(1, -30, 0, 18),
+    Position = UDim2.new(0, 15, 0, 230),
     Text = LoadingMessages[1],
     TextSize = 12,
     TextColor3 = CONFIG.SubTextColor,
-    ZIndex = 3,
     Font = Enum.Font.Code,
+    ZIndex = 3,
 })
 
--- progress bar background
+-- progress bar bg
 local BarBG = MakeFrame(LoaderCard, {
-    Size = UDim2.new(1, -40, 0, 6),
-    Position = UDim2.new(0, 20, 0, 262),
-    BackgroundColor3 = Color3.fromRGB(30, 34, 50),
+    Size = UDim2.new(1, -40, 0, 5),
+    Position = UDim2.new(0, 20, 0, 263),
+    BackgroundColor3 = Color3.fromRGB(22, 26, 42),
+    BackgroundTransparency = 0,
     ZIndex = 3,
 })
 MakeCorner(BarBG, 3)
@@ -236,8 +265,8 @@ MakeCorner(BarBG, 3)
 -- progress bar fill
 local BarFill = MakeFrame(BarBG, {
     Size = UDim2.new(0, 0, 1, 0),
-    Position = UDim2.new(0, 0, 0, 0),
     BackgroundColor3 = CONFIG.AccentColor,
+    BackgroundTransparency = 0,
     ZIndex = 4,
 })
 MakeCorner(BarFill, 3)
@@ -246,48 +275,49 @@ MakeGradient(BarFill, 90, {
     ColorSequenceKeypoint.new(1, CONFIG.AccentColor2),
 })
 
--- timer label
+-- timer
 local TimerLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(0, 80, 0, 20),
-    Position = UDim2.new(0, 20, 0, 280),
+    Size = UDim2.new(0, 80, 0, 18),
+    Position = UDim2.new(0, 20, 0, 278),
     Text = "05:00",
-    TextSize = 13,
+    TextSize = 12,
     TextColor3 = CONFIG.SubTextColor,
     TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 3,
     Font = Enum.Font.Code,
+    ZIndex = 3,
 })
 
--- percent label
+-- percent
 local PctLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(0, 60, 0, 20),
-    Position = UDim2.new(1, -80, 0, 280),
+    Size = UDim2.new(0, 50, 0, 18),
+    Position = UDim2.new(1, -70, 0, 278),
     Text = "0%",
-    TextSize = 13,
+    TextSize = 12,
     TextColor3 = CONFIG.AccentColor,
     TextXAlignment = Enum.TextXAlignment.Right,
-    ZIndex = 3,
     Font = Enum.Font.Code,
+    ZIndex = 3,
 })
 
 -- dots
-local DotsFrame = MakeFrame(LoaderCard, {
-    Size = UDim2.new(0, 60, 0, 12),
-    Position = UDim2.new(0.5, -30, 0, 316),
+local DotsHolder = MakeFrame(LoaderCard, {
+    Size = UDim2.new(0, 56, 0, 10),
+    Position = UDim2.new(0.5, -28, 0, 310),
     ZIndex = 3,
 })
-local UIListLayout = Instance.new("UIListLayout")
-UIListLayout.FillDirection = Enum.FillDirection.Horizontal
-UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-UIListLayout.Padding = UDim.new(0, 8)
-UIListLayout.Parent = DotsFrame
+local dll = Instance.new("UIListLayout")
+dll.FillDirection = Enum.FillDirection.Horizontal
+dll.HorizontalAlignment = Enum.HorizontalAlignment.Center
+dll.VerticalAlignment = Enum.VerticalAlignment.Center
+dll.Padding = UDim.new(0, 8)
+dll.Parent = DotsHolder
 
 local Dots = {}
 for i = 1, 3 do
-    local d = MakeFrame(DotsFrame, {
-        Size = UDim2.new(0, 8, 0, 8),
-        BackgroundColor3 = i == 2 and CONFIG.AccentColor or Color3.fromRGB(40, 44, 60),
+    local d = MakeFrame(DotsHolder, {
+        Size = UDim2.new(0, 7, 0, 7),
+        BackgroundColor3 = i == 1 and CONFIG.AccentColor or Color3.fromRGB(35, 38, 55),
+        BackgroundTransparency = 0,
         ZIndex = 4,
     })
     MakeCorner(d, 4)
@@ -295,140 +325,138 @@ for i = 1, 3 do
 end
 
 -- footer
-local FooterLabel = MakeLabel(LoaderCard, {
-    Size = UDim2.new(1, -20, 0, 18),
-    Position = UDim2.new(0, 10, 0, 402),
+MakeLabel(LoaderCard, {
+    Size = UDim2.new(1, -20, 0, 16),
+    Position = UDim2.new(0, 10, 0, 386),
     Text = "zapickle  ·  for educational purposes only",
-    TextSize = 11,
-    TextColor3 = Color3.fromRGB(50, 55, 75),
-    ZIndex = 3,
+    TextSize = 10,
+    TextColor3 = Color3.fromRGB(35, 40, 60),
     Font = Enum.Font.Code,
+    ZIndex = 3,
 })
 
 -- // =============================
 -- //        SCRIPT PANEL
 -- // =============================
-local Panel = MakeFrame(Overlay, {
-    Size = UDim2.new(0, 360, 0, 440),
-    Position = UDim2.new(0.5, -180, 0.5, -220),
+local Panel = MakeFrame(ScreenGui, {
+    Size = UDim2.new(0, 300, 0, 416),
+    Position = UDim2.new(0.5, -150, 0.5, -208),
     BackgroundColor3 = CONFIG.CardColor,
-    BackgroundTransparency = 0,
+    BackgroundTransparency = 0.06,
     ZIndex = 2,
     Visible = false,
 })
 MakeCorner(Panel, 20)
-MakeStroke(Panel, CONFIG.AccentColor, 1, 0.75)
+MakeStroke(Panel, CONFIG.AccentColor, 1, 0.72)
+MakeDraggable(Panel)
 
 -- panel top glow
-local PanelTopLine = MakeFrame(Panel, {
-    Size = UDim2.new(0.5, 0, 0, 1),
-    Position = UDim2.new(0.25, 0, 0, 0),
+local PTL = MakeFrame(Panel, {
+    Size = UDim2.new(0.55, 0, 0, 1),
+    Position = UDim2.new(0.225, 0, 0, 0),
     BackgroundColor3 = CONFIG.AccentColor,
-    BackgroundTransparency = 0.2,
+    BackgroundTransparency = 0,
     ZIndex = 3,
 })
-MakeGradient(PanelTopLine, 90, {
+MakeGradient(PTL, 90, {
     ColorSequenceKeypoint.new(0, Color3.fromRGB(0,0,0)),
     ColorSequenceKeypoint.new(0.5, CONFIG.AccentColor),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0)),
 })
 
--- panel header
+-- header
 local PanelHeader = MakeFrame(Panel, {
-    Size = UDim2.new(1, 0, 0, 52),
-    Position = UDim2.new(0, 0, 0, 0),
+    Size = UDim2.new(1, 0, 0, 50),
     BackgroundTransparency = 1,
     ZIndex = 3,
 })
 
-local HeaderDot = MakeFrame(PanelHeader, {
-    Size = UDim2.new(0, 10, 0, 10),
-    Position = UDim2.new(0, 20, 0.5, -5),
+local PulseDot = MakeFrame(PanelHeader, {
+    Size = UDim2.new(0, 9, 0, 9),
+    Position = UDim2.new(0, 18, 0.5, -4),
     BackgroundColor3 = CONFIG.AccentColor,
+    BackgroundTransparency = 0,
     ZIndex = 4,
 })
-MakeCorner(HeaderDot, 5)
+MakeCorner(PulseDot, 5)
 
-local HeaderTitle = MakeLabel(PanelHeader, {
+MakeLabel(PanelHeader, {
     Size = UDim2.new(1, -100, 1, 0),
-    Position = UDim2.new(0, 38, 0, 0),
+    Position = UDim2.new(0, 34, 0, 0),
     Text = "SCRIPT PANEL",
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(200, 215, 235),
+    TextSize = 12,
+    TextColor3 = Color3.fromRGB(180, 200, 220),
     TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 4,
     Font = Enum.Font.Code,
+    ZIndex = 4,
 })
 
 -- close button
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 28, 0, 28)
-CloseBtn.Position = UDim2.new(1, -46, 0.5, -14)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
-CloseBtn.BackgroundTransparency = 0.6
+CloseBtn.Size = UDim2.new(0, 26, 0, 26)
+CloseBtn.Position = UDim2.new(1, -42, 0.5, -13)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(90, 15, 15)
+CloseBtn.BackgroundTransparency = 0.5
 CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
-CloseBtn.TextSize = 14
+CloseBtn.TextColor3 = Color3.fromRGB(255, 75, 75)
+CloseBtn.TextSize = 13
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.BorderSizePixel = 0
-CloseBtn.ZIndex = 4
+CloseBtn.ZIndex = 5
 CloseBtn.Parent = PanelHeader
 MakeCorner(CloseBtn, 6)
-MakeStroke(CloseBtn, Color3.fromRGB(255, 80, 80), 1, 0.65)
+MakeStroke(CloseBtn, Color3.fromRGB(255, 70, 70), 1, 0.6)
 
 CloseBtn.MouseEnter:Connect(function()
-    Tween(CloseBtn, {BackgroundTransparency = 0.2}, 0.2)
+    Tween(CloseBtn, {BackgroundTransparency = 0.15}, 0.18)
 end)
 CloseBtn.MouseLeave:Connect(function()
-    Tween(CloseBtn, {BackgroundTransparency = 0.6}, 0.2)
+    Tween(CloseBtn, {BackgroundTransparency = 0.5}, 0.18)
 end)
 CloseBtn.MouseButton1Click:Connect(function()
-    Tween(Panel, {BackgroundTransparency = 1}, 0.3)
-    Tween(Overlay, {BackgroundTransparency = 1}, 0.4)
+    Tween(Panel, {BackgroundTransparency = 1}, 0.35)
     task.wait(0.4)
     ScreenGui:Destroy()
 end)
 
--- divider under header
-local Divider = MakeFrame(Panel, {
-    Size = UDim2.new(1, -40, 0, 1),
-    Position = UDim2.new(0, 20, 0, 52),
+-- header divider
+MakeFrame(Panel, {
+    Size = UDim2.new(1, -36, 0, 1),
+    Position = UDim2.new(0, 18, 0, 50),
     BackgroundColor3 = CONFIG.AccentColor,
-    BackgroundTransparency = 0.85,
+    BackgroundTransparency = 0.88,
     ZIndex = 3,
 })
 
--- section label maker
-local function MakeSectionLabel(parent, text, yPos)
-    return MakeLabel(parent, {
-        Size = UDim2.new(1, -40, 0, 18),
-        Position = UDim2.new(0, 20, 0, yPos),
-        Text = text,
-        TextSize = 11,
-        TextColor3 = Color3.fromRGB(0, 130, 180),
+-- section label helper
+local function SectionLabel(yPos, txt)
+    MakeLabel(Panel, {
+        Size = UDim2.new(1, -36, 0, 16),
+        Position = UDim2.new(0, 18, 0, yPos),
+        Text = txt,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(0, 120, 170),
         TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 3,
         Font = Enum.Font.Code,
+        ZIndex = 3,
     })
 end
 
-MakeSectionLabel(Panel, "── TRADE MODS", 62)
-MakeSectionLabel(Panel, "── VISUALS", 232)
+SectionLabel(56, "── TRADE MODS")
+SectionLabel(206, "── VISUALS")
 
--- toggle row maker
-local function MakeToggleRow(parent, labelText, yPos, defaultOn, onToggle)
-    local Row = MakeFrame(parent, {
-        Size = UDim2.new(1, -2, 0, 52),
+-- toggle row helper
+local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
+    local Row = MakeFrame(Panel, {
+        Size = UDim2.new(1, -2, 0, 46),
         Position = UDim2.new(0, 1, 0, yPos),
-        BackgroundColor3 = Color3.fromRGB(18, 21, 34),
+        BackgroundColor3 = Color3.fromRGB(16, 19, 30),
         BackgroundTransparency = 1,
         ZIndex = 3,
     })
 
-    -- hover accent bar
     local AccentBar = MakeFrame(Row, {
         Size = UDim2.new(0, 3, 1, 0),
-        Position = UDim2.new(0, 0, 0, 0),
         BackgroundColor3 = CONFIG.AccentColor,
         BackgroundTransparency = 1,
         ZIndex = 4,
@@ -438,52 +466,63 @@ local function MakeToggleRow(parent, labelText, yPos, defaultOn, onToggle)
         ColorSequenceKeypoint.new(1, CONFIG.AccentColor2),
     })
 
-    -- row label
-    local Label = MakeLabel(Row, {
-        Size = UDim2.new(0.6, 0, 1, 0),
-        Position = UDim2.new(0, 18, 0, 0),
+    local RowLabel = MakeLabel(Row, {
+        Size = UDim2.new(0.65, 0, 1, 0),
+        Position = UDim2.new(0, 16, 0, 0),
         Text = labelText,
-        TextSize = 17,
-        TextColor3 = Color3.fromRGB(180, 190, 210),
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(170, 182, 205),
         TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 4,
         Font = Enum.Font.GothamSemibold,
+        ZIndex = 4,
     })
 
-    -- on/off text
     local OnOffLabel = MakeLabel(Row, {
-        Size = UDim2.new(0, 36, 1, 0),
-        Position = UDim2.new(1, -86, 0, 0),
+        Size = UDim2.new(0, 30, 1, 0),
+        Position = UDim2.new(1, -74, 0, 0),
         Text = defaultOn and "ON" or "OFF",
-        TextSize = 11,
-        TextColor3 = defaultOn and CONFIG.AccentColor or Color3.fromRGB(60, 65, 85),
+        TextSize = 10,
+        TextColor3 = defaultOn and CONFIG.AccentColor or Color3.fromRGB(55, 60, 80),
         TextXAlignment = Enum.TextXAlignment.Right,
-        ZIndex = 4,
         Font = Enum.Font.Code,
-    })
-
-    -- toggle background
-    local TglBG = MakeFrame(Row, {
-        Size = UDim2.new(0, 44, 0, 24),
-        Position = UDim2.new(1, -62, 0.5, -12),
-        BackgroundColor3 = defaultOn and Color3.fromRGB(0, 50, 80) or Color3.fromRGB(30, 33, 48),
         ZIndex = 4,
     })
-    MakeCorner(TglBG, 12)
-    MakeStroke(TglBG, defaultOn and CONFIG.AccentColor or Color3.fromRGB(50, 55, 75), 1, defaultOn and 0.4 or 0.7)
 
-    -- toggle knob
+    local TglBG = MakeFrame(Row, {
+        Size = UDim2.new(0, 40, 0, 22),
+        Position = UDim2.new(1, -56, 0.5, -11),
+        BackgroundColor3 = defaultOn and Color3.fromRGB(0, 45, 72) or Color3.fromRGB(26, 29, 44),
+        BackgroundTransparency = 0,
+        ZIndex = 4,
+    })
+    MakeCorner(TglBG, 11)
+    local TglStroke = MakeStroke(TglBG,
+        defaultOn and CONFIG.AccentColor or Color3.fromRGB(45, 50, 70),
+        1,
+        defaultOn and 0.35 or 0.65
+    )
+
     local TglKnob = MakeFrame(TglBG, {
-        Size = UDim2.new(0, 16, 0, 16),
-        Position = defaultOn and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
-        BackgroundColor3 = defaultOn and CONFIG.AccentColor or Color3.fromRGB(60, 65, 90),
+        Size = UDim2.new(0, 14, 0, 14),
+        Position = defaultOn
+            and UDim2.new(1, -17, 0.5, -7)
+            or  UDim2.new(0, 3,   0.5, -7),
+        BackgroundColor3 = defaultOn and CONFIG.AccentColor or Color3.fromRGB(55, 60, 85),
+        BackgroundTransparency = 0,
         ZIndex = 5,
     })
-    MakeCorner(TglKnob, 8)
+    MakeCorner(TglKnob, 7)
+
+    -- row divider
+    MakeFrame(Row, {
+        Size = UDim2.new(1, -32, 0, 1),
+        Position = UDim2.new(0, 16, 1, -1),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.94,
+        ZIndex = 3,
+    })
 
     local isOn = defaultOn
-
-    -- invisible button
     local Btn = Instance.new("TextButton")
     Btn.Size = UDim2.new(1, 0, 1, 0)
     Btn.BackgroundTransparency = 1
@@ -492,164 +531,153 @@ local function MakeToggleRow(parent, labelText, yPos, defaultOn, onToggle)
     Btn.Parent = Row
 
     Btn.MouseEnter:Connect(function()
-        Tween(Row, {BackgroundTransparency = 0.85}, 0.2)
-        Tween(AccentBar, {BackgroundTransparency = 0}, 0.2)
-        Tween(Label, {TextColor3 = Color3.fromRGB(230, 240, 255)}, 0.2)
+        Tween(Row, {BackgroundTransparency = 0.82}, 0.18)
+        Tween(AccentBar, {BackgroundTransparency = 0}, 0.18)
+        Tween(RowLabel, {TextColor3 = Color3.fromRGB(225, 238, 255)}, 0.18)
     end)
     Btn.MouseLeave:Connect(function()
-        Tween(Row, {BackgroundTransparency = 1}, 0.2)
-        Tween(AccentBar, {BackgroundTransparency = 1}, 0.2)
-        Tween(Label, {TextColor3 = Color3.fromRGB(180, 190, 210)}, 0.2)
+        Tween(Row, {BackgroundTransparency = 1}, 0.18)
+        Tween(AccentBar, {BackgroundTransparency = 1}, 0.18)
+        Tween(RowLabel, {TextColor3 = Color3.fromRGB(170, 182, 205)}, 0.18)
     end)
 
     Btn.MouseButton1Click:Connect(function()
         isOn = not isOn
         if isOn then
-            Tween(TglKnob, {Position = UDim2.new(1, -19, 0.5, -8), BackgroundColor3 = CONFIG.AccentColor}, 0.25)
-            Tween(TglBG, {BackgroundColor3 = Color3.fromRGB(0, 50, 80)}, 0.25)
-            Tween(OnOffLabel, {TextColor3 = CONFIG.AccentColor}, 0.2)
+            Tween(TglKnob, {Position = UDim2.new(1, -17, 0.5, -7), BackgroundColor3 = CONFIG.AccentColor}, 0.22)
+            Tween(TglBG, {BackgroundColor3 = Color3.fromRGB(0, 45, 72)}, 0.22)
+            Tween(TglStroke, {Color = CONFIG.AccentColor, Transparency = 0.35}, 0.22)
+            Tween(OnOffLabel, {TextColor3 = CONFIG.AccentColor}, 0.18)
             OnOffLabel.Text = "ON"
         else
-            Tween(TglKnob, {Position = UDim2.new(0, 3, 0.5, -8), BackgroundColor3 = Color3.fromRGB(60, 65, 90)}, 0.25)
-            Tween(TglBG, {BackgroundColor3 = Color3.fromRGB(30, 33, 48)}, 0.25)
-            Tween(OnOffLabel, {TextColor3 = Color3.fromRGB(60, 65, 85)}, 0.2)
+            Tween(TglKnob, {Position = UDim2.new(0, 3, 0.5, -7), BackgroundColor3 = Color3.fromRGB(55, 60, 85)}, 0.22)
+            Tween(TglBG, {BackgroundColor3 = Color3.fromRGB(26, 29, 44)}, 0.22)
+            Tween(TglStroke, {Color = Color3.fromRGB(45, 50, 70), Transparency = 0.65}, 0.22)
+            Tween(OnOffLabel, {TextColor3 = Color3.fromRGB(55, 60, 80)}, 0.18)
             OnOffLabel.Text = "OFF"
         end
         if onToggle then onToggle(isOn) end
     end)
-
-    return Row
 end
 
--- build toggle rows
+-- build all toggle rows
 local toggleDefs = {
-    -- label, yPos, defaultOn, stateKey
-    {"Freeze Trade",   82,  false, "FreezeTrade"},
-    {"Auto Accept",    136, false, "AutoAccept"},
-    {"Force Accept",   190, true,  "ForceAccept"},
-    {"ESP Players",    252, false, "ESPPlayers"},
-    {"Infinite Yield", 306, false, "InfiniteYield"},
-    {"God Mode",       360, false, "GodMode"},
+    {74,  "Freeze Trade",   false, "FreezeTrade"},
+    {122, "Auto Accept",    false, "AutoAccept"},
+    {170, "Force Accept",   true,  "ForceAccept"},
+    {224, "ESP Players",    false, "ESPPlayers"},
+    {272, "Infinite Yield", false, "InfiniteYield"},
+    {320, "God Mode",       false, "GodMode"},
 }
-
-for _, def in ipairs(toggleDefs) do
-    local label, yPos, default, key = def[1], def[2], def[3], def[4]
-    MakeToggleRow(Panel, label, yPos, default, function(val)
-        State[key] = val
-        print("[zapickle] " .. label .. " -> " .. tostring(val))
+for _, d in ipairs(toggleDefs) do
+    MakeToggleRow(d[1], d[2], d[3], function(val)
+        State[d[4]] = val
+        print("[zapickle] " .. d[2] .. " -> " .. tostring(val))
     end)
 end
 
 -- panel footer
 MakeLabel(Panel, {
-    Size = UDim2.new(1, -20, 0, 18),
-    Position = UDim2.new(0, 10, 0, 416),
+    Size = UDim2.new(1, -20, 0, 16),
+    Position = UDim2.new(0, 10, 0, 388),
     Text = "zapickle  ·  for educational purposes only",
-    TextSize = 11,
-    TextColor3 = Color3.fromRGB(35, 40, 58),
-    ZIndex = 3,
+    TextSize = 10,
+    TextColor3 = Color3.fromRGB(30, 34, 52),
     Font = Enum.Font.Code,
+    ZIndex = 3,
 })
 
 -- // =============================
 -- //       LOADER LOGIC
 -- // =============================
-local function PadNum(n)
-    return string.format("%02d", math.floor(n))
-end
-
 local elapsed = 0
-local totalTime = CONFIG.LoadTime
+local msgIndex = 1
+local msgTimer = 0
+local MSG_INTERVAL = math.floor(CONFIG.LoadTime / #LoadingMessages)
 
--- animate spinning ring
-local ringAngle = 0
+-- spinning ring + pulse dot animation
 RunService.Heartbeat:Connect(function(dt)
-    ringAngle = ringAngle + dt * 120
-    if ringAngle >= 360 then ringAngle = ringAngle - 360 end
-    AvatarRing.Rotation = ringAngle
-    -- pulse the header dot on panel
+    AvatarRing.Rotation += dt * 130
     if Panel.Visible then
-        local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
-        HeaderDot.BackgroundTransparency = 0.1 + pulse * 0.5
+        PulseDot.BackgroundTransparency = 0.1 + 0.7 * math.abs(math.sin(os.clock() * 2.5))
     end
 end)
 
--- main loading loop
+-- main countdown loop
 task.spawn(function()
-    while elapsed < totalTime do
+    while elapsed < CONFIG.LoadTime do
         task.wait(1)
-        elapsed = elapsed + 1
+        elapsed += 1
 
-        local pct = math.floor((elapsed / totalTime) * 100)
-        local remaining = totalTime - elapsed
+        local pct = math.floor((elapsed / CONFIG.LoadTime) * 100)
+        local remaining = CONFIG.LoadTime - elapsed
         local mins = math.floor(remaining / 60)
         local secs = remaining % 60
 
-        -- update bar
-        Tween(BarFill, {Size = UDim2.new(pct / 100, 0, 1, 0)}, 0.8, Enum.EasingStyle.Linear)
+        -- update bar smoothly
+        Tween(BarFill, {Size = UDim2.new(pct / 100, 0, 1, 0)}, 0.85, Enum.EasingStyle.Linear)
 
-        -- update labels
+        -- update timer + percent
         TimerLabel.Text = PadNum(mins) .. ":" .. PadNum(secs)
         PctLabel.Text = pct .. "%"
 
-        -- update sub text
-        local msgIdx = math.min(math.ceil((elapsed / totalTime) * #LoadingMessages), #LoadingMessages)
-        SubLabel.Text = LoadingMessages[msgIdx]
+        -- cycle sub message with fade
+        msgTimer += 1
+        if msgTimer >= MSG_INTERVAL and msgIndex < #LoadingMessages then
+            msgTimer = 0
+            msgIndex += 1
+            Tween(SubLabel, {TextTransparency = 1}, 0.28)
+            task.wait(0.3)
+            SubLabel.Text = LoadingMessages[msgIndex]
+            Tween(SubLabel, {TextTransparency = 0}, 0.28)
+        end
 
-        -- update dots
+        -- progress dots (3 stages)
+        local stage = math.clamp(math.ceil((elapsed / CONFIG.LoadTime) * 3), 1, 3)
         for i, d in ipairs(Dots) do
-            if i == math.ceil(pct / 34) then
-                Tween(d, {BackgroundColor3 = CONFIG.AccentColor}, 0.3)
-            else
-                Tween(d, {BackgroundColor3 = Color3.fromRGB(40, 44, 60)}, 0.3)
-            end
+            Tween(d, {
+                BackgroundColor3 = i == stage and CONFIG.AccentColor or Color3.fromRGB(35, 38, 55)
+            }, 0.3)
         end
 
-        -- pulse status label
-        if elapsed % 2 == 0 then
-            Tween(StatusLabel, {TextTransparency = 0.4}, 0.5)
-        else
-            Tween(StatusLabel, {TextTransparency = 0}, 0.5)
-        end
+        -- pulse SCRIPT LOADING text
+        Tween(StatusLabel, {TextTransparency = elapsed % 2 == 0 and 0.45 or 0}, 0.5)
     end
 
-    -- done loading
+    -- loading done
     StatusLabel.Text = "READY"
     StatusLabel.TextColor3 = CONFIG.AccentColor
+    StatusLabel.TextTransparency = 0
     SubLabel.Text = "Script loaded successfully."
     TimerLabel.Text = "00:00"
     PctLabel.Text = "100%"
-    Tween(BarFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.5)
+    Tween(BarFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.4)
+    task.wait(0.9)
 
-    task.wait(0.8)
-
-    -- fade out loader, show panel
-    Tween(LoaderCard, {BackgroundTransparency = 1}, 0.5)
+    -- fade out loader
+    Tween(LoaderCard, {BackgroundTransparency = 1}, 0.4)
     for _, child in ipairs(LoaderCard:GetDescendants()) do
-        if child:IsA("TextLabel") or child:IsA("Frame") then
-            pcall(function()
-                if child:IsA("TextLabel") then
-                    Tween(child, {TextTransparency = 1}, 0.4)
-                else
-                    Tween(child, {BackgroundTransparency = 1}, 0.4)
-                end
-            end)
-        end
+        pcall(function()
+            if child:IsA("TextLabel") then
+                Tween(child, {TextTransparency = 1}, 0.3)
+            elseif child:IsA("Frame") then
+                Tween(child, {BackgroundTransparency = 1}, 0.3)
+            end
+        end)
     end
-
-    task.wait(0.6)
+    task.wait(0.5)
     LoaderCard.Visible = false
 
-    -- slide in panel
+    -- slide panel in
     Panel.Visible = true
-    Panel.Position = UDim2.new(0.5, -180, 0.5, -200)
+    Panel.Position = UDim2.new(0.5, -150, 0.5, -228)
     Panel.BackgroundTransparency = 1
     Tween(Panel, {
-        BackgroundTransparency = 0,
-        Position = UDim2.new(0.5, -180, 0.5, -220)
+        BackgroundTransparency = 0.06,
+        Position = UDim2.new(0.5, -150, 0.5, -208)
     }, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
-    print("[zapickle] Script panel opened. All systems go.")
+    print("[zapickle] Panel ready. Drag to move anywhere.")
 end)
 
-print("[zapickle] Loader started. " .. CONFIG.LoadTime .. "s until ready.")
+print("[zapickle] Loader started — " .. CONFIG.LoadTime .. "s remaining.")
